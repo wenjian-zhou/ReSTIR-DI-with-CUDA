@@ -1,0 +1,9 @@
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <algorithm>
+#include <random>
+#include <cuda_runtime.h>
+#include <vector_types.h>
+#include <device_launch_parameters.h>
+#include "cutil_math.h"
