@@ -1,11 +1,5 @@
 #include "ReSTIRDI.h"
 
-#define INV_PI 0.31830988618
-#define M_PI 3.14159265359f  // pi
-#define width 1024  // screenwidth
-#define height 768 // screenheight
-#define samps 2048 // samples 
-
 // random number generator from https://github.com/gz/rust-raytracer
 
 __device__ static float getrandom(unsigned int *seed0, unsigned int *seed1) {
@@ -255,20 +249,27 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 	return shadingColor;
 }
 
-__global__ void render_kernel(float3 *output) {
+// union struct required for mapping pixel colours to OpenGL buffer
+union Colour  // 4 bytes = 4 chars = 1 float
+{
+	float c;
+	uchar4 components;
+};
+
+__global__ void render_kernel(float3 *finaloutputbuffer) {
 	// assign a CUDA thread to every pixel (x,y) 
     // blockIdx, blockDim and threadIdx are CUDA specific keywords
     // replaces nested outer loops in CPU code looping over image rows and image columns 
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;   
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 
-	unsigned int i = (height - y - 1)*width + x; // index of current pixel (calculated using thread index) 
+	int i = (scr_height - y - 1)*scr_width + x; // index of current pixel (calculated using thread index) 
 
     unsigned int s1 = x;  // seeds for random number generator
     unsigned int s2 = y;
 
 	Ray cam(make_float3(50, 52, 295.6), normalize(make_float3(0, -0.042612, -1))); // first hardcoded camera ray(origin, direction)
-	float3 cx = make_float3(width * .5135 / height, 0.0f, 0.0f); // ray direction offset in x direction
+	float3 cx = make_float3(scr_width * .5135 / scr_height, 0.0f, 0.0f); // ray direction offset in x direction
     float3 cy = normalize(cross(cx, cam.direction)) * .5135; // ray direction offset in y direction (.5135 is field of view angle)
     float3 r; // r is final pixel color     
 
@@ -277,53 +278,64 @@ __global__ void render_kernel(float3 *output) {
     for (int s = 0; s < samps; s++){  // samples per pixel
         
 		// compute primary ray direction
-		float3 d = cam.direction + cx*((.25 + x) / width - .5) + cy*((.25 + y) / height - .5);
+		float3 d = cam.direction + cx*((.25 + x) / scr_width - .5) + cy*((.25 + y) / scr_height - .5);
 		
 		// create primary ray, add incoming radiance to pixelcolor
 		r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
     }       // Camera rays are pushed ^^^^^ forward to start in interior   
 
+	Colour fcolour;
+	float3 colour = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
+	//printf("colour: %f %f %f\n", colour.x, colour.y, colour.z);
+	// convert from 96-bit to 24-bit colour + perform gamma correction
+  	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
+    (unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
+    (unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
+	//printf("colour: %d %d %d\n", fcolour.components.x, fcolour.components.y, fcolour.components.z);
+	finaloutputbuffer[i] = make_float3(x, y, fcolour.c);
+	//printf("buffer: %f\n", finaloutputbuffer[i].x);
+	//printf("buffer: %f\n", fcolour.c);
 	// write rgb value of pixel to image buffer on the GPU, clamp value to [0.0f, 1.0f] range
-    output[i] = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
+    //output[i] = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
 }
 
-int main(int argc, char* argv[]) {
-	float3* output_h = new float3[width*height]; // pointer to memory for image on the host (system RAM)
-    float3* output_d;    // pointer to memory for image on the device (GPU VRAM)
+void render_gate(float3* finaloutputbuffer) {
+	//float3* output_h = new float3[width*height]; // pointer to memory for image on the host (system RAM)
+    //float3* output_d;    // pointer to memory for image on the device (GPU VRAM)
 
     // allocate memory on the CUDA device (GPU VRAM)
-    cudaMalloc(&output_d, width * height * sizeof(float3));
+    //cudaMalloc(&output_d, width * height * sizeof(float3));
         
     // dim3 is CUDA specific type, block and grid are required to schedule CUDA threads over streaming multiprocessors
     dim3 block(8, 8, 1);   
-    dim3 grid(width / block.x, height / block.y, 1);
+    dim3 grid(scr_width / block.x, scr_height / block.y, 1);
 
-    printf("CUDA initialised.\nStart rendering...\n");
+    //printf("CUDA initialised.\nStart rendering...\n");
     
     // schedule threads on device and launch CUDA kernel from host
-    render_kernel <<< grid, block >>>(output_d);  
+    render_kernel <<< grid, block >>>(finaloutputbuffer);  
 
 	// Wait for GPU to finish before accessing on host
   	cudaDeviceSynchronize();
 
     // copy results of computation from device back to host
-    cudaMemcpy(output_h, output_d, width * height *sizeof(float3), cudaMemcpyDeviceToHost);  
+    //cudaMemcpy(output_h, output_d, width * height *sizeof(float3), cudaMemcpyDeviceToHost);  
     
     // free CUDA memory
-    cudaFree(output_d);  
+    //cudaFree(output_d);  
 
-    printf("Done!\n");
+    //printf("Done!\n");
 
     // Write image to PPM file, a very simple image file format
-    FILE *f = fopen("smallptcuda.ppm", "w");          
-    fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
-    for (int i = 0; i < width*height; i++)  // loop over pixels, write RGB values
-    fprintf(f, "%d %d %d ", ToInt(output_h[i].x),
-                            ToInt(output_h[i].y),
-                            ToInt(output_h[i].z));
+    // FILE *f = fopen("smallptcuda.ppm", "w");          
+    // fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
+    // for (int i = 0; i < width*height; i++)  // loop over pixels, write RGB values
+    // fprintf(f, "%d %d %d ", ToInt(output_h[i].x),
+    //                         ToInt(output_h[i].y),
+    //                         ToInt(output_h[i].z));
     
-    printf("Saved image to 'smallptcuda.ppm'\n");
+    // printf("Saved image to 'smallptcuda.ppm'\n");
 
-    delete[] output_h;
-    system("PAUSE");
+    //delete[] output_h;
+    // system("PAUSE");
 }
