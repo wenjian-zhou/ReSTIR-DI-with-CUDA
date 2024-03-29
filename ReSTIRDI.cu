@@ -288,11 +288,16 @@ __global__ void render_kernel(float3 *finaloutputbuffer) {
 	float3 colour = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
 	//printf("colour: %f %f %f\n", colour.x, colour.y, colour.z);
 	// convert from 96-bit to 24-bit colour + perform gamma correction
-  	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
+  	
+	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
     (unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
-    (unsigned char)(powf(colour.z, 1 / 2.2f) * 255), 1);
+    (unsigned char)(powf(colour.z, 1 / 2.2f) * 255),1);
+	
+	//fcolour.components = make_uchar4((unsigned char)(55), (unsigned char)(25), (unsigned char)(255), 1);
+
 	//printf("colour: %d %d %d\n", fcolour.components.x, fcolour.components.y, fcolour.components.z);
 	finaloutputbuffer[i] = make_float3(x, y, fcolour.c);
+	//finaloutputbuffer[i] = make_float3(colour.x, colour.y, colour.z);
 	//printf("buffer: %f\n", finaloutputbuffer[i].x);
 	//printf("buffer: %f\n", fcolour.c);
 	// write rgb value of pixel to image buffer on the GPU, clamp value to [0.0f, 1.0f] range

@@ -1,7 +1,7 @@
 #include "ReSTIRDI.h"
 #include <GL/glew.h>
 #include <GL/freeglut.h>
-#include <GL/GL.h>
+//#include <GL/GL.h>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
@@ -33,18 +33,18 @@ void createVBO(GLuint* vbo)
 }
 
 void disp(void) {
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
     cudaGLMapBufferObject((void**)&finaloutputbuffer, vbo);
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     render_gate(finaloutputbuffer);
     //printf("%f\n", *finaloutputbuffer[3].x);
 
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glVertexPointer(2, GL_FLOAT, 12, 0);
+	glVertexPointer(2, GL_FLOAT, 12, (GLvoid*)0);
 	glColorPointer(4, GL_UNSIGNED_BYTE, 12, (GLvoid*)8);
 
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -82,10 +82,12 @@ int main(int argc, char** argv) {
 	glutInitWindowPosition(100, 100);
 	glutCreateWindow("ReSTIR DI");
 
-    cudaGLSetGLDevice(0);
-    cudaSetDevice(0);
+	int cuda_devices[1];
+	unsigned int num_cuda_devices;
+	cudaGLGetDevices(&num_cuda_devices, cuda_devices, 1, cudaGLDeviceListAll);
+    cudaSetDevice(cuda_devices[0]);
 
-    //glDisable(GL_DEPTH_TEST);
+    glDisable(GL_DEPTH_TEST);
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glMatrixMode(GL_PROJECTION);
