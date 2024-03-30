@@ -256,7 +256,7 @@ union Colour  // 4 bytes = 4 chars = 1 float
 	uchar4 components;
 };
 
-__global__ void render_kernel(float3 *finaloutputbuffer) {
+__global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
 	// assign a CUDA thread to every pixel (x,y) 
     // blockIdx, blockDim and threadIdx are CUDA specific keywords
     // replaces nested outer loops in CPU code looping over image rows and image columns 
@@ -268,7 +268,7 @@ __global__ void render_kernel(float3 *finaloutputbuffer) {
     unsigned int s1 = x;  // seeds for random number generator
     unsigned int s2 = y;
 
-	Ray cam(make_float3(50, 52, 295.6), normalize(make_float3(0, -0.042612, -1))); // first hardcoded camera ray(origin, direction)
+	Ray cam(make_float3(50 + offset.x * 10, 52 - offset.y * 10, 295.6), normalize(make_float3(0, -0.042612, -1))); // first hardcoded camera ray(origin, direction)
 	float3 cx = make_float3(scr_width * .5135 / scr_height, 0.0f, 0.0f); // ray direction offset in x direction
     float3 cy = normalize(cross(cx, cam.direction)) * .5135; // ray direction offset in y direction (.5135 is field of view angle)
     float3 r; // r is final pixel color     
@@ -281,6 +281,14 @@ __global__ void render_kernel(float3 *finaloutputbuffer) {
 		float3 d = cam.direction + cx*((.25 + x) / scr_width - .5) + cy*((.25 + y) / scr_height - .5);
 		
 		// create primary ray, add incoming radiance to pixelcolor
+		// if (0)
+		// {
+		// 	r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &s1, &s2)*(1. / samps);
+		// }
+		// else
+		// {
+		// 	r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
+		// }
 		r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
     }       // Camera rays are pushed ^^^^^ forward to start in interior   
 
@@ -304,7 +312,7 @@ __global__ void render_kernel(float3 *finaloutputbuffer) {
     //output[i] = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
 }
 
-void render_gate(float3* finaloutputbuffer) {
+void render_gate(float3* finaloutputbuffer, float2 offset) {
 	//float3* output_h = new float3[width*height]; // pointer to memory for image on the host (system RAM)
     //float3* output_d;    // pointer to memory for image on the device (GPU VRAM)
 
@@ -318,7 +326,7 @@ void render_gate(float3* finaloutputbuffer) {
     //printf("CUDA initialised.\nStart rendering...\n");
     
     // schedule threads on device and launch CUDA kernel from host
-    render_kernel <<< grid, block >>>(finaloutputbuffer);  
+    render_kernel <<< grid, block >>>(finaloutputbuffer, offset);  
 
 	// Wait for GPU to finish before accessing on host
   	cudaDeviceSynchronize();

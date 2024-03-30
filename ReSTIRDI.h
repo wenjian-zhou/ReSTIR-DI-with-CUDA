@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <algorithm>
 #include <random>
+#include <cmath>
 #include <cuda.h>
 #include <curand.h>
 #include <curand_kernel.h>
@@ -17,4 +18,4 @@
 #define scr_height 768 // screenheight
 #define samps 1 // samples 
 
-void render_gate(float3* finaloutputbuffer);
+void render_gate(float3* finaloutputbuffer, float2 offset);

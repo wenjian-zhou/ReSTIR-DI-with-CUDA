@@ -37,9 +37,10 @@ void disp(void) {
     cudaGLMapBufferObject((void**)&finaloutputbuffer, vbo);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    render_gate(finaloutputbuffer);
-    //printf("%f\n", *finaloutputbuffer[3].x);
+	
+	const int current_t = glutGet(GLUT_ELAPSED_TIME);
+	float2 offset = make_float2(std::cosf(float(current_t) * 0.001), std::sinf(float(current_t) * 0.001));
+    render_gate(finaloutputbuffer, offset);
 
     cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -51,7 +52,7 @@ void disp(void) {
 	glEnableClientState(GL_COLOR_ARRAY);
 	glDrawArrays(GL_POINTS, 0, scr_width * scr_height);
 	glDisableClientState(GL_VERTEX_ARRAY);
-    //glDisableClientState(GL_COLOR_ARRAY);
+
 	glutSwapBuffers();
 }
 
@@ -76,10 +77,11 @@ void MouseMotion(int x, int y) {}
 
 int main(int argc, char** argv) {
     glutInitContextVersion(4, 5);
+	glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
 	glutInit(&argc, argv); //to initialize GLUT
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
 	glutInitWindowSize(scr_width, scr_height); //Requirement3: Specifying the size of the window
-	glutInitWindowPosition(100, 100);
+	glutInitWindowPosition(0, 0);
 	glutCreateWindow("ReSTIR DI");
 
 	int cuda_devices[1];
