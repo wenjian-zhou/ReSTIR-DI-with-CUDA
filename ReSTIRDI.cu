@@ -26,10 +26,13 @@ struct Ray
 	__device__ Ray(const float3& m_origin, const float3& m_direction) : origin(m_origin), direction(m_direction) {}
 };
 
+enum Refl_t { DIFF, SPEC };
+
 struct Sphere 
 {
 	float radius;
 	float3 position, color;
+	Refl_t refl;
 	__device__ double Intersect(const Ray& ray) const {
 		float3 op = position - ray.origin;
 		double t, epsilon = 1e-4;
@@ -45,21 +48,26 @@ struct PointLight
 };
 
 __constant__ Sphere spheres[] = {//Scene: radius, position, color
-	{1e5, {1e5 + 1,40.8,81.6}, {.75,.25,.25}},//Left
-	{1e5, {-1e5 + 99,40.8,81.6}, {.25,.25,.75}},//Rght
-	{1e5, {50.0,40.8, 1e5}, {.75,.75,.75}},//Back
-	//{1e5, {50.0,40.8, -1e5 + 170}, {0.0, 0.0, 0.0}},//Frnt
-	{1e5, {50.0, 1e5, 81.6}, {.75,.75,.75}},//Botm
-	//Sphere(1e5, float3(50,1e5 + 81.6,81.6), float3(.75,.75,.75)),//Top
-	{16.5,{27.0,16.5,47}, {.75,.55,.25}},//Ball1
-	{16.5,{73.0,16.5,78}, {.55,.25,.75}}//Ball2
+	{1e5, {50, -100000, 0}, {.184,.929,.929}, DIFF},//ground
+	{4e4, {50, -4e4-30, -3000}, {.2,.2,.2}, DIFF},//mountains
+	{26.5, {22,26.5,42}, {.596,.596,.596}, SPEC},//Ball1
+	{13, {75,13,82}, {.96,.96,.96}, DIFF},//Ball2
+	{22,{87,22,24}, {.75,.55,.25}, DIFF},//Ball3
+	{1e4,{50.0,40.8,-1e4-200}, {.7,.7,.7}, DIFF}//Sky
 };
 
 __constant__ PointLight lights[] = {// Scene: positioin, emission
-	{{50.0, 81.6 - 1.27, 76.6}, {5000.0, 5000.0, 5000.0}},
-	{{40.0, 81.6 - 2.27, 26.6}, {5000.0, 5000.0, 5000.0}},
-	{{60.0, 81.6 - 2.27, 106.6}, {5000.0, 5000.0, 5000.0}},
-	{{50.0, 81.6 - 2.27, 76.6}, {5000.0, 5000.0, 5000.0}}
+	{{-50.0, 181.6 + 10.27, 176.6}, {5000.0, 9000.0, 5000.0}},
+	{{0.0, 181.6 - 20.27, -126.6}, {1000.0, 5000.0, 7000.0}},
+	{{50.0, 181.6 + 305.27, 146.6}, {6000.0, 5000.0, 5000.0}},
+	{{80.0, 181.6 - 432.27, -156.6}, {5000.0, 3000.0, 5000.0}},
+	{{-20.0, 181.6 + 59.27, 136.6}, {5000.0, 5000.0, 5000.0}},
+	{{-10.0, 181.6 - 68.27, 156.6}, {5000.0, 9000.0, 5000.0}},
+	{{10.0, 181.6 + 7.27, -106.6}, {5000.0, 5000.0, 9000.0}},
+	{{30.0, 181.6 - 8.27, 126.6}, {1000.0, 5000.0, 5000.0}},
+	{{60.0, 181.6 + 93.27, -146.6}, {6000.0, 5000.0, 5000.0}},
+	{{100.0, 181.6 - 63.27, 166.6}, {5000.0, 3000.0, 5000.0}},
+	{{-110.0, 181.6 + 77.27, -156.6}, {1e3, 6e3, 1e3}}
 };
 
 inline __host__ __device__ double Clamp(double x) 
@@ -104,10 +112,22 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	Ray ray = r;
 
 	if (!Intersect(ray, t, id)) return float3();
-	const Sphere& obj = spheres[id]; // the hit object
+	Sphere* obj = &spheres[id]; // the hit object
 	float3 hitPoint = ray.origin + ray.direction * t;
-	float3 normal = normalize(hitPoint - obj.position);
+	float3 normal = normalize(hitPoint - obj->position);
 	float3 normal_local = dot(normal, ray.direction) < 0 ? normal : normal * -1;
+
+	// Perform specular reflection but not as iteration
+	if (obj->refl == SPEC)
+	{
+		float3 reflectionDirection = ray.direction - normal * 2 * dot(normal, ray.direction);
+		Ray reflectionRay = Ray(hitPoint + normal * 2e-2, reflectionDirection);
+		if (!Intersect(reflectionRay, t, id)) return float3();
+		obj = &spheres[id]; // the hit object
+		hitPoint = reflectionRay.origin + reflectionRay.direction * t;
+		normal = normalize(hitPoint - obj->position);
+		normal_local = dot(normal, reflectionRay.direction) < 0 ? normal : normal * -1;
+	}
 
 	int lightsCount = sizeof(lights) / sizeof(PointLight);
 	int RISSamples = lightsCount > M ? M : lightsCount;
@@ -133,7 +153,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 		double lightAttenuation = 1 / (distanceToLight * distanceToLight);
 
 		// Compute the BRDF
-		float3 BRDF = obj.color * INV_PI * cosTheta;
+		float3 BRDF = obj->color * INV_PI * cosTheta;
 
 		// Compute the light intensity
 		float3 lightIntensity = lightEmission * lightAttenuation;
@@ -182,7 +202,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	double lightAttenuation = 1 / (distanceToLight * distanceToLight);
 
 	// Compute the BRDF
-	float3 BRDF = obj.color * INV_PI * cosTheta;
+	float3 BRDF = obj->color * INV_PI * cosTheta;
 
 	// Compute the light intensity
 	float3 lightIntensity = lightEmission * lightAttenuation;
@@ -209,10 +229,22 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 	Ray ray = r;
 	
 	if (!Intersect(ray, t, id)) return make_float3(0.0f, 0.0f, 0.0f);;
-	const Sphere& obj = spheres[id]; // the hit object
+	Sphere* obj = &spheres[id]; // the hit object
 	float3 hitPoint = ray.origin + ray.direction * t;
-	float3 normal = normalize(hitPoint - obj.position);
+	float3 normal = normalize(hitPoint - obj->position);
 	float3 normal_local = dot(normal, ray.direction) < 0 ? normal : normal * -1;
+
+	// Perform specular reflection but not as iteration
+	if (obj->refl == SPEC)
+	{
+		float3 reflectionDirection = ray.direction - normal * 2 * dot(normal, ray.direction);
+		Ray reflectionRay = Ray(hitPoint + normal * 2e-2, reflectionDirection);
+		if (!Intersect(reflectionRay, t, id)) return float3();
+		obj = &spheres[id]; // the hit object
+		hitPoint = reflectionRay.origin + reflectionRay.direction * t;
+		normal = normalize(hitPoint - obj->position);
+		normal_local = dot(normal, reflectionRay.direction) < 0 ? normal : normal * -1;
+	}
 
 	// Pick a random light from the scene to sample
 	int lightsCount = sizeof(lights) / sizeof(PointLight);
@@ -244,7 +276,7 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 
 	// Compute the direct illumination of Lambertian BRDF
 	float3 shadingColor = make_float3(0.0f, 0.0f, 0.0f);
-	shadingColor += obj.color * lightEmission * INV_PI * cosTheta * lightAttenuation * visibility * invPdf;
+	shadingColor += obj->color * lightEmission * INV_PI * cosTheta * lightAttenuation * visibility * invPdf;
 
 	return shadingColor;
 }
@@ -281,15 +313,15 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
 		float3 d = cam.direction + cx*((.25 + x) / scr_width - .5) + cy*((.25 + y) / scr_height - .5);
 		
 		// create primary ray, add incoming radiance to pixelcolor
-		// if (0)
-		// {
-		// 	r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &s1, &s2)*(1. / samps);
-		// }
-		// else
-		// {
-		// 	r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
-		// }
-		r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
+		if (1)
+		{
+			r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &s1, &s2)*(1. / samps);
+		}
+		else
+		{
+			r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
+		}
+		//r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
     }       // Camera rays are pushed ^^^^^ forward to start in interior   
 
 	Colour fcolour;
