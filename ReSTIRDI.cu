@@ -111,7 +111,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	int id = 0; // id of intersected object
 	Ray ray = r;
 
-	if (!Intersect(ray, t, id)) return float3();
+	if (!Intersect(ray, t, id)) return make_float3(0.0f, 0.0f, 0.0f);
 	Sphere* obj = &spheres[id]; // the hit object
 	float3 hitPoint = ray.origin + ray.direction * t;
 	float3 normal = normalize(hitPoint - obj->position);
@@ -122,7 +122,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	{
 		float3 reflectionDirection = ray.direction - normal * 2 * dot(normal, ray.direction);
 		Ray reflectionRay = Ray(hitPoint + normal * 2e-2, reflectionDirection);
-		if (!Intersect(reflectionRay, t, id)) return float3();
+		if (!Intersect(reflectionRay, t, id)) return make_float3(0.0f, 0.0f, 0.0f);
 		obj = &spheres[id]; // the hit object
 		hitPoint = reflectionRay.origin + reflectionRay.direction * t;
 		normal = normalize(hitPoint - obj->position);
@@ -228,7 +228,7 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 	int id = 0; // id of intersected object
 	Ray ray = r;
 	
-	if (!Intersect(ray, t, id)) return make_float3(0.0f, 0.0f, 0.0f);;
+	if (!Intersect(ray, t, id)) return make_float3(0.0f, 0.0f, 0.0f);
 	Sphere* obj = &spheres[id]; // the hit object
 	float3 hitPoint = ray.origin + ray.direction * t;
 	float3 normal = normalize(hitPoint - obj->position);
@@ -239,7 +239,7 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 	{
 		float3 reflectionDirection = ray.direction - normal * 2 * dot(normal, ray.direction);
 		Ray reflectionRay = Ray(hitPoint + normal * 2e-2, reflectionDirection);
-		if (!Intersect(reflectionRay, t, id)) return float3();
+		if (!Intersect(reflectionRay, t, id)) return make_float3(0.0f, 0.0f, 0.0f);
 		obj = &spheres[id]; // the hit object
 		hitPoint = reflectionRay.origin + reflectionRay.direction * t;
 		normal = normalize(hitPoint - obj->position);
@@ -258,7 +258,7 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 
 	// Compute the Lambertian cosine
 	double cosTheta = dot(normal_local, lightDirection);
-	if (cosTheta < 0) return float3();
+	if (cosTheta < 0) return make_float3(0.0f, 0.0f, 0.0f);
 
 	// Check if the light is visible
 	double visibility = 0;
@@ -313,7 +313,7 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
 		float3 d = cam.direction + cx*((.25 + x) / scr_width - .5) + cy*((.25 + y) / scr_height - .5);
 		
 		// create primary ray, add incoming radiance to pixelcolor
-		if (1)
+		if (x <= 512)
 		{
 			r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &s1, &s2)*(1. / samps);
 		}
@@ -352,7 +352,7 @@ void render_gate(float3* finaloutputbuffer, float2 offset) {
     //cudaMalloc(&output_d, width * height * sizeof(float3));
         
     // dim3 is CUDA specific type, block and grid are required to schedule CUDA threads over streaming multiprocessors
-    dim3 block(8, 8, 1);   
+    dim3 block(16, 16, 1);   
     dim3 grid(scr_width / block.x, scr_height / block.y, 1);
 
     //printf("CUDA initialised.\nStart rendering...\n");
