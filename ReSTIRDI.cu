@@ -1,24 +1,5 @@
 #include "ReSTIRDI.h"
 
-// random number generator from https://github.com/gz/rust-raytracer
-
-__device__ static float getrandom(unsigned int *seed0, unsigned int *seed1) {
-    *seed0 = 36969 * ((*seed0) & 65535) + ((*seed0) >> 16);  // hash the seeds using bitwise AND and bitshifts
-    *seed1 = 18000 * ((*seed1) & 65535) + ((*seed1) >> 16);
-
-    unsigned int ires = ((*seed0) << 16) + (*seed1);
-
-    // Convert to float
-    union {
-    float f;
-    unsigned int ui;
-    } res;
-
-    res.ui = (ires & 0x007fffff) | 0x40000000;  // bitwise AND, bitwise OR
-
-    return (res.f - 2.f) / 2.f;
-}
-
 struct Ray 
 {
 	float3 origin;
@@ -95,17 +76,17 @@ struct Reservoir
 	int id = 0; // Selected light id
 	float wSum = 0; // Sum of weights
 
-	__device__ void addSample(int lightID, float weight, unsigned int *s1, unsigned int *s2)
+	__device__ void addSample(int lightID, float weight, curandState *randstate)
 	{
 		wSum = wSum + weight;
-		if (getrandom(s1, s2) < weight / wSum)
+		if (curand_uniform(randstate) < weight / wSum)
 		{
 			id = lightID;
 		}
 	}
 };
 
-__device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned int *s2)
+__device__ float3 RIS_DI(const Ray& r, const int& M, curandState *randstate)
 {
 	double t; // distance to intersection
 	int id = 0; // id of intersected object
@@ -137,7 +118,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	for (int i = 0; i < RISSamples; i++)
 	{
 		// Pick a random light from the scene to sample
-		int randomLight = int(getrandom(s1, s2) * lightsCount);
+		int randomLight = int(curand_uniform(randstate) * lightsCount);
 		int lightToSample = randomLight > lightsCount - 1 ? lightsCount - 1 : randomLight;
 
 		// Sample the light
@@ -174,7 +155,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 		float weight = pHat * MISWeight * contributionWeight;
 
 		// Add the sample to the reservoir
-		reservoir.addSample(lightToSample, weight, s1, s2);
+		reservoir.addSample(lightToSample, weight, randstate);
 	}
 
 	// The chosen light to sample and the contribution weight
@@ -222,7 +203,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, unsigned int *s1, unsigned 
 	return color;
 }
 
-__device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned int *s2)
+__device__ float3 DirectIllumination(const Ray& r, curandState *randstate)
 {
 	double t; // distance to intersection
 	int id = 0; // id of intersected object
@@ -248,7 +229,7 @@ __device__ float3 DirectIllumination(const Ray& r, unsigned int *s1, unsigned in
 
 	// Pick a random light from the scene to sample
 	int lightsCount = sizeof(lights) / sizeof(PointLight);
-	int randomLight = int(getrandom(s1, s2) * lightsCount);
+	int randomLight = int(curand_uniform(randstate) * lightsCount);
 	int lightToSample = randomLight > lightsCount - 1 ? lightsCount - 1 : randomLight;
 
 	// Sample the light
@@ -288,7 +269,18 @@ union Colour  // 4 bytes = 4 chars = 1 float
 	uchar4 components;
 };
 
-__global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
+// hash function to calculate new seed for each frame
+// see http://www.reedbeta.com/blog/2013/01/12/quick-and-easy-gpu-random-numbers-in-d3d11/
+uint WangHash(uint a) {
+	a = (a ^ 61) ^ (a >> 16);
+	a = a + (a << 3);
+	a = a ^ (a >> 4);
+	a = a * 0x27d4eb2d;
+	a = a ^ (a >> 15);
+	return a;
+}
+
+__global__ void render_kernel(float3 *finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber) {
 	// assign a CUDA thread to every pixel (x,y) 
     // blockIdx, blockDim and threadIdx are CUDA specific keywords
     // replaces nested outer loops in CPU code looping over image rows and image columns 
@@ -297,10 +289,14 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
 
 	int i = (scr_height - y - 1)*scr_width + x; // index of current pixel (calculated using thread index) 
 
-    unsigned int s1 = x;  // seeds for random number generator
-    unsigned int s2 = y;
+	// global threadId, see richiesams blogspot
+	int threadId = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
-	Ray cam(make_float3(50 + offset.x * 10, 52 - offset.y * 10, 295.6), normalize(make_float3(0, -0.042612, -1))); // first hardcoded camera ray(origin, direction)
+	// create random number generator, see RichieSams blogspot
+	curandState randState; // state of the random number generator, to prevent repetition
+	curand_init(hashedframenumber + threadId, 0, 0, &randState);
+
+	Ray cam(make_float3(50 + offset.x * 20, 52 - offset.y * 10, 295.6), normalize(make_float3(0, -0.042612, -1))); // first hardcoded camera ray(origin, direction)
 	float3 cx = make_float3(scr_width * .5135 / scr_height, 0.0f, 0.0f); // ray direction offset in x direction
     float3 cy = normalize(cross(cx, cam.direction)) * .5135; // ray direction offset in y direction (.5135 is field of view angle)
     float3 r; // r is final pixel color     
@@ -315,72 +311,33 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset) {
 		// create primary ray, add incoming radiance to pixelcolor
 		if (x <= 512)
 		{
-			r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &s1, &s2)*(1. / samps);
+			r = r + DirectIllumination(Ray(cam.origin + d * 40, normalize(d)), &randState)*(1. / samps);
 		}
 		else
 		{
-			r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
+			r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &randState)*(1. / samps); 
 		}
-		//r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &s1, &s2)*(1. / samps); 
-    }       // Camera rays are pushed ^^^^^ forward to start in interior   
+    }   // Camera rays are pushed ^^^^^ forward to start in interior   
 
 	Colour fcolour;
 	float3 colour = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
-	//printf("colour: %f %f %f\n", colour.x, colour.y, colour.z);
+	
 	// convert from 96-bit to 24-bit colour + perform gamma correction
-  	
-	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
+  	fcolour.components = make_uchar4((unsigned char)(powf(colour.x, 1 / 2.2f) * 255),
     (unsigned char)(powf(colour.y, 1 / 2.2f) * 255),
     (unsigned char)(powf(colour.z, 1 / 2.2f) * 255),1);
-	
-	//fcolour.components = make_uchar4((unsigned char)(55), (unsigned char)(25), (unsigned char)(255), 1);
 
-	//printf("colour: %d %d %d\n", fcolour.components.x, fcolour.components.y, fcolour.components.z);
 	finaloutputbuffer[i] = make_float3(x, y, fcolour.c);
-	//finaloutputbuffer[i] = make_float3(colour.x, colour.y, colour.z);
-	//printf("buffer: %f\n", finaloutputbuffer[i].x);
-	//printf("buffer: %f\n", fcolour.c);
-	// write rgb value of pixel to image buffer on the GPU, clamp value to [0.0f, 1.0f] range
-    //output[i] = make_float3(clamp(r.x, 0.0f, 1.0f), clamp(r.y, 0.0f, 1.0f), clamp(r.z, 0.0f, 1.0f));
 }
 
-void render_gate(float3* finaloutputbuffer, float2 offset) {
-	//float3* output_h = new float3[width*height]; // pointer to memory for image on the host (system RAM)
-    //float3* output_d;    // pointer to memory for image on the device (GPU VRAM)
-
-    // allocate memory on the CUDA device (GPU VRAM)
-    //cudaMalloc(&output_d, width * height * sizeof(float3));
-        
+void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber) {
     // dim3 is CUDA specific type, block and grid are required to schedule CUDA threads over streaming multiprocessors
     dim3 block(16, 16, 1);   
     dim3 grid(scr_width / block.x, scr_height / block.y, 1);
-
-    //printf("CUDA initialised.\nStart rendering...\n");
     
     // schedule threads on device and launch CUDA kernel from host
-    render_kernel <<< grid, block >>>(finaloutputbuffer, offset);  
+    render_kernel <<< grid, block >>>(finaloutputbuffer, offset, framenumber, hashedframenumber);  
 
 	// Wait for GPU to finish before accessing on host
   	cudaDeviceSynchronize();
-
-    // copy results of computation from device back to host
-    //cudaMemcpy(output_h, output_d, width * height *sizeof(float3), cudaMemcpyDeviceToHost);  
-    
-    // free CUDA memory
-    //cudaFree(output_d);  
-
-    //printf("Done!\n");
-
-    // Write image to PPM file, a very simple image file format
-    // FILE *f = fopen("smallptcuda.ppm", "w");          
-    // fprintf(f, "P3\n%d %d\n%d\n", width, height, 255);
-    // for (int i = 0; i < width*height; i++)  // loop over pixels, write RGB values
-    // fprintf(f, "%d %d %d ", ToInt(output_h[i].x),
-    //                         ToInt(output_h[i].y),
-    //                         ToInt(output_h[i].z));
-    
-    // printf("Saved image to 'smallptcuda.ppm'\n");
-
-    //delete[] output_h;
-    // system("PAUSE");
 }

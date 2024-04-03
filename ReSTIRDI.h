@@ -1,3 +1,5 @@
+#pragma once
+
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -18,4 +20,6 @@
 #define scr_height 768 // screenheight
 #define samps 1 // samples 
 
-void render_gate(float3* finaloutputbuffer, float2 offset);
+void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber);
+
+uint WangHash(uint a);

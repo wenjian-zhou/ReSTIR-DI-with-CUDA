@@ -11,6 +11,7 @@
 
 GLuint vbo;
 float3* finaloutputbuffer = NULL;
+int frames = 0;
 
 void deleteCudaAndCpuMemory(){
 	// free CUDA memory
@@ -33,6 +34,7 @@ void createVBO(GLuint* vbo)
 }
 
 void disp(void) {
+	frames++;
     cudaDeviceSynchronize();
     cudaGLMapBufferObject((void**)&finaloutputbuffer, vbo);
 
@@ -40,12 +42,12 @@ void disp(void) {
 	
 	const int current_t = glutGet(GLUT_ELAPSED_TIME);
 	float2 offset = make_float2(std::cosf(float(current_t) * 0.001), std::sinf(float(current_t) * 0.001));
-    render_gate(finaloutputbuffer, offset);
+    render_gate(finaloutputbuffer, offset, frames, WangHash(frames));
 
     cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glVertexPointer(2, GL_FLOAT, 12, (GLvoid*)0);
+	glVertexPointer(2, GL_FLOAT, 12, 0);
 	glColorPointer(4, GL_UNSIGNED_BYTE, 12, (GLvoid*)8);
 
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -64,7 +66,7 @@ void Idle()
 void Keys(unsigned char key, int x, int y){
     switch (key)
 	{
-	case 27: glutLeaveMainLoop(); //Requirement5: press esc to exit
+	case 27: glutLeaveMainLoop();
 		break;
 	default:
 		break;
@@ -78,9 +80,9 @@ void MouseMotion(int x, int y) {}
 int main(int argc, char** argv) {
     glutInitContextVersion(4, 5);
 	glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
-	glutInit(&argc, argv); //to initialize GLUT
+	glutInit(&argc, argv);
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-	glutInitWindowSize(scr_width, scr_height); //Requirement3: Specifying the size of the window
+	glutInitWindowSize(scr_width, scr_height);
 	glutInitWindowPosition(0, 0);
 	glutCreateWindow("ReSTIR DI");
 
