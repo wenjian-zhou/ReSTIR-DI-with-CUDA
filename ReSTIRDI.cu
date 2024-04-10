@@ -71,23 +71,10 @@ inline __device__ bool Intersect(const Ray& ray, double& t, int& id)
 	return t < inf;
 }
 
-struct Reservoir
+__device__ float3 RIS_DI(const Ray& r, const int& M, curandState *randstate, int pixelIndex, Reservoir *previousReservoir)
 {
-	int id = 0; // Selected light id
-	float wSum = 0; // Sum of weights
+	bool temporalReuse = true;
 
-	__device__ void addSample(int lightID, float weight, curandState *randstate)
-	{
-		wSum = wSum + weight;
-		if (curand_uniform(randstate) < weight / wSum)
-		{
-			id = lightID;
-		}
-	}
-};
-
-__device__ float3 RIS_DI(const Ray& r, const int& M, curandState *randstate)
-{
 	double t; // distance to intersection
 	int id = 0; // id of intersected object
 	Ray ray = r;
@@ -114,6 +101,7 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, curandState *randstate)
 	int RISSamples = lightsCount > M ? M : lightsCount;
 
 	Reservoir reservoir;
+	Reservoir temporal_reservoir;
 
 	for (int i = 0; i < RISSamples; i++)
 	{
@@ -156,6 +144,63 @@ __device__ float3 RIS_DI(const Ray& r, const int& M, curandState *randstate)
 
 		// Add the sample to the reservoir
 		reservoir.addSample(lightToSample, weight, randstate);
+	}
+
+	// Temporal reuse of the previous frame
+	if (temporalReuse)
+	{
+		
+		int currentSample = reservoir.id;
+
+		int previousSample = previousReservoir[pixelIndex].id;
+		//	previousSample = previousReservoir[pixelIndex].id;
+		//	previousWeight = previousReservoir[pixelIndex].wSum;
+
+		// calculate current pHat
+		double distanceToLight = length(lights[currentSample].position - hitPoint);
+		float3 lightEmission = lights[currentSample].emission;
+		float3 lightDirection = normalize(lights[currentSample].position - hitPoint);
+		double cosTheta = dot(normal_local, lightDirection);
+		if (cosTheta < 0) cosTheta = 0.;
+		double lightAttenuation = 1 / (distanceToLight * distanceToLight);
+		float3 BRDF = obj->color * INV_PI * cosTheta;
+		float3 lightIntensity = lightEmission * lightAttenuation;
+		float3 radiance = BRDF * lightIntensity;
+		float currPHat = length(radiance);
+
+		// calculate previous pHat
+		distanceToLight = length(lights[previousSample].position - hitPoint);
+		lightEmission = lights[previousSample].emission;
+		lightDirection = normalize(lights[previousSample].position - hitPoint);
+		cosTheta = dot(normal_local, lightDirection);
+		if (cosTheta < 0) cosTheta = 0.;
+		lightAttenuation = 1 / (distanceToLight * distanceToLight);
+		BRDF = obj->color * INV_PI * cosTheta;
+		lightIntensity = lightEmission * lightAttenuation;
+		radiance = BRDF * lightIntensity;
+		float prevPHat = length(radiance);
+
+		// calculate MIS weights for both samples
+		float currentMISWeight = currPHat / (20.0 * prevPHat + currPHat);
+		float previousMISWeight = 20.0 * prevPHat / (20.0 * prevPHat + currPHat);
+
+		// calculate the weight of the samples
+		float currentSampleWeight = currPHat > 0.0 ? (1. / currPHat) * reservoir.wSum : 0.0;
+		float previousSampleWeight = prevPHat > 0.0 ? (1. / prevPHat) * previousReservoir[pixelIndex].wSum : 0.0;
+
+		// calculate the contribution weight of the samples
+		float currentCW = currPHat * currentMISWeight * currentSampleWeight;
+		float previousCW = prevPHat * previousMISWeight * previousSampleWeight;
+
+		temporal_reservoir.addSample(currentSample, currentCW, randstate);
+		temporal_reservoir.addSample(previousSample, previousCW, randstate);
+
+		// Update the reservoir
+		reservoir.id = temporal_reservoir.id;
+		reservoir.wSum = temporal_reservoir.wSum;
+
+		// Update the previous reservoir
+		previousReservoir[pixelIndex] = reservoir;
 	}
 
 	// The chosen light to sample and the contribution weight
@@ -280,7 +325,7 @@ uint WangHash(uint a) {
 	return a;
 }
 
-__global__ void render_kernel(float3 *finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber) {
+__global__ void render_kernel(float3 *finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber, Reservoir *previousReservoir) {
 	// assign a CUDA thread to every pixel (x,y) 
     // blockIdx, blockDim and threadIdx are CUDA specific keywords
     // replaces nested outer loops in CPU code looping over image rows and image columns 
@@ -315,7 +360,7 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset, int fram
 		}
 		else
 		{
-			r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &randState)*(1. / samps); 
+			r = r + RIS_DI(Ray(cam.origin + d * 40, normalize(d)), 32, &randState, i, previousReservoir)*(1. / samps); 
 		}
     }   // Camera rays are pushed ^^^^^ forward to start in interior   
 
@@ -330,13 +375,13 @@ __global__ void render_kernel(float3 *finaloutputbuffer, float2 offset, int fram
 	finaloutputbuffer[i] = make_float3(x, y, fcolour.c);
 }
 
-void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber) {
+void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber, Reservoir *previousReservoir) {
     // dim3 is CUDA specific type, block and grid are required to schedule CUDA threads over streaming multiprocessors
     dim3 block(16, 16, 1);   
     dim3 grid(scr_width / block.x, scr_height / block.y, 1);
     
     // schedule threads on device and launch CUDA kernel from host
-    render_kernel <<< grid, block >>>(finaloutputbuffer, offset, framenumber, hashedframenumber);  
+    render_kernel <<< grid, block >>>(finaloutputbuffer, offset, framenumber, hashedframenumber, previousReservoir);  
 
 	// Wait for GPU to finish before accessing on host
   	cudaDeviceSynchronize();

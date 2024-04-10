@@ -12,10 +12,13 @@
 GLuint vbo;
 float3* finaloutputbuffer = NULL;
 int frames = 0;
+Reservoir* previousReservoir = NULL;
+bool moveCamera = false;
 
 void deleteCudaAndCpuMemory(){
 	// free CUDA memory
 	cudaFree(finaloutputbuffer);
+	cudaFree(previousReservoir);
 }
 
 void createVBO(GLuint* vbo)
@@ -42,7 +45,12 @@ void disp(void) {
 	
 	const int current_t = glutGet(GLUT_ELAPSED_TIME);
 	float2 offset = make_float2(std::cosf(float(current_t) * 0.001), std::sinf(float(current_t) * 0.001));
-    render_gate(finaloutputbuffer, offset, frames, WangHash(frames));
+    if (!moveCamera)
+	{
+		offset.x = 0.0f;
+		offset.y = 0.0f;
+	}
+	render_gate(finaloutputbuffer, offset, frames, WangHash(frames), previousReservoir);
 
     cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -108,6 +116,8 @@ int main(int argc, char** argv) {
 	glewInit();
 
     createVBO(&vbo);
+
+	cudaMalloc((void**)&previousReservoir, scr_width * scr_height * sizeof(Reservoir));
 
     glutMainLoop();
 

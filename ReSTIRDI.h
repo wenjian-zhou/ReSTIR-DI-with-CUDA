@@ -20,6 +20,23 @@
 #define scr_height 768 // screenheight
 #define samps 1 // samples 
 
-void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber);
+struct Reservoir
+{
+	int id = 0; // Selected light id
+	float wSum = 0; // Sum of weights
+	int M = 0; // Number of samples
+
+	__device__ void addSample(int lightID, float weight, curandState *randstate)
+	{
+		M = M + 1;
+		wSum = wSum + weight;
+		if (curand_uniform(randstate) < weight / wSum)
+		{
+			id = lightID;
+		}
+	}
+};
+
+void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber, Reservoir *previousReservoir);
 
 uint WangHash(uint a);
