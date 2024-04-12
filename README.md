@@ -1,6 +1,6 @@
-# Direct-Illumination-with-RIS
+# ReSTIR DI with CUDA
 
-An implementation of RIS on direct illumination based on [smallpt](https://www.kevinbeason.com/smallpt/), if there's any error please let me know!
+An implementation of ReSTIR DI based on [smallpt](https://www.kevinbeason.com/smallpt/) with CUDA acceleration, if there's any error please let me know!
 
 ## References
 
