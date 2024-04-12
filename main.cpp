@@ -1,4 +1,7 @@
 #include "ReSTIRDI.h"
+#include <ImGui/imgui.h>
+#include <ImGui/imgui_impl_glut.h>
+#include <ImGui/imgui_impl_opengl3.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 //#include <GL/GL.h>
@@ -10,27 +13,29 @@
 #include <cuda_gl_interop.h>
 
 GLuint vbo;
-float3* finaloutputbuffer = NULL;
+float3* finalOutputBuffer = NULL;
 int frames = 0;
 Reservoir* previousReservoir = NULL;
 Reservoir* currentReservoir = NULL;
 bool moveCamera = false;
 bool useReSTIR = false;
+bool temporalReuse = false;
+bool spatialReuse = false;
 
-void createCudaAndCpuMemory(){
+void CreateCudaAndCpuMemory(){
 	// allocate CUDA memory
 	cudaMalloc((void**)&previousReservoir, scr_width * scr_height * sizeof(Reservoir));
 	cudaMalloc((void**)&currentReservoir, scr_width * scr_height * sizeof(Reservoir));
 }
 
-void deleteCudaAndCpuMemory(){
+void DeleteCudaAndCpuMemory(){
 	// free CUDA memory
-	cudaFree(finaloutputbuffer);
+	cudaFree(finalOutputBuffer);
 	cudaFree(previousReservoir);
 	cudaFree(currentReservoir);
 }
 
-void createVBO(GLuint* vbo)
+void CreateVBO(GLuint* vbo)
 {
 	//Create vertex buffer object
 	glGenBuffers(1, vbo);
@@ -45,18 +50,32 @@ void createVBO(GLuint* vbo)
 	cudaGLRegisterBufferObject(*vbo);
 }
 
-void disp(void) {
+void Display(void) {
+	ImGui_ImplOpenGL3_NewFrame();
+	ImGui_ImplGLUT_NewFrame();
+	ImGui::NewFrame();
+	ImGuiIO& io = ImGui::GetIO();
+
+	ImGui::Begin("ReSTIR DI");
+	ImGui::Text("ReSTIR DI control panel:");
+	ImGui::Checkbox("Use ReSTIR DI", &useReSTIR);
+	ImGui::Checkbox("Temporal Reuse", &temporalReuse);
+	ImGui::Checkbox("Spatial Reuse", &spatialReuse);
+	ImGui::End();
+
+	ImGui::Render();
+
 	frames++;
     cudaDeviceSynchronize();
-    cudaGLMapBufferObject((void**)&finaloutputbuffer, vbo);
+    cudaGLMapBufferObject((void**)&finalOutputBuffer, vbo);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	const int current_t = glutGet(GLUT_ELAPSED_TIME);
 
-	render_gate(finaloutputbuffer, frames, WangHash(frames), 
+	RenderGate(finalOutputBuffer, frames, WangHash(frames), 
 				previousReservoir, currentReservoir, 
-				useReSTIR);
+				useReSTIR, temporalReuse, spatialReuse);
 
     cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -69,6 +88,9 @@ void disp(void) {
 	glDrawArrays(GL_POINTS, 0, scr_width * scr_height);
 	glDisableClientState(GL_VERTEX_ARRAY);
 
+	glUseProgram(0);
+	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
 	glutSwapBuffers();
 }
 
@@ -76,25 +98,6 @@ void Idle()
 {
 	glutPostRedisplay(); //CS6610 Requirement
 }
-
-void Keys(unsigned char key, int x, int y){
-    switch (key)
-	{
-	case 27: glutLeaveMainLoop();
-		break;
-	default:
-		break;
-	}
-
-	// Use space key to switch between ReSTIR and non-ReSTIR
-	if (key == ' ')
-	{
-		useReSTIR = !useReSTIR;
-	}
-}
-void SpecialKeys(int key, int x, int y) {}
-void Mouse(int button, int state, int x, int y) {}
-void MouseMotion(int x, int y) {}
 
 
 int main(int argc, char** argv) {
@@ -117,24 +120,39 @@ int main(int argc, char** argv) {
     glMatrixMode(GL_PROJECTION);
 	gluOrtho2D(0.0, scr_width, 0.0, scr_height);
 
-    glutDisplayFunc(disp);
-    glutKeyboardFunc(Keys);
-    glutSpecialFunc(SpecialKeys);
-    glutMouseFunc(Mouse);
-    glutMotionFunc(MouseMotion);
+    glutDisplayFunc(Display);
     glutIdleFunc(Idle);
 
-    // call glewInit() after creating the OpenGL window
+	// Setup Dear ImGui context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
+
+	// Setup Dear ImGui style
+	ImGui::StyleColorsDark();
+
+	// Setup Platform/Renderer bindings
+	ImGui_ImplGLUT_Init();
+	ImGui_ImplOpenGL3_Init();
+
+	ImGui_ImplGLUT_InstallFuncs();
+
+	// call glewInit() after creating the OpenGL window
 	glewInit();
 
-    createVBO(&vbo);
+    CreateVBO(&vbo);
 
-	createCudaAndCpuMemory();
-	//produce_reference();
+	CreateCudaAndCpuMemory();
+	//produceReference();
 
     glutMainLoop();
 
-    deleteCudaAndCpuMemory();
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGLUT_Shutdown();
+	ImGui::DestroyContext();
+
+    DeleteCudaAndCpuMemory();
 
 	return 0;
 }

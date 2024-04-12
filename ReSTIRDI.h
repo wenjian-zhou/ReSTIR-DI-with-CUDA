@@ -23,12 +23,12 @@
 struct Reservoir
 {
 	int id = 0; // Selected light id
-	float wSum = 0; // Sum of weights
-	int M = 0; // Number of samples
+	float wSum = 0.0; // Sum of weights
+	float3 normal = make_float3(0, 0, 0); // Normal
+	float depth = 0.0; // Depth
 
 	__device__ void addSample(int lightID, float weight, curandState *randstate)
 	{
-		M = M + 1;
 		wSum = wSum + weight;
 		if (curand_uniform(randstate) < weight / wSum)
 		{
@@ -37,10 +37,10 @@ struct Reservoir
 	}
 };
 
-void render_gate(float3* finaloutputbuffer, int framenumber, uint hashedframenumber, 
+void RenderGate(float3* finalOutputBuffer, int frameNumber, uint hashedFrameNumber, 
 				 Reservoir *previousReservoir, Reservoir *currentReservoir, 
-				 bool useReSTIR);
+				 bool useReSTIR, bool temporalReuse, bool spatialReuse);
 
 uint WangHash(uint a);
 
-// void produce_reference();
+void produceReference();
