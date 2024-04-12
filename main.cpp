@@ -13,12 +13,21 @@ GLuint vbo;
 float3* finaloutputbuffer = NULL;
 int frames = 0;
 Reservoir* previousReservoir = NULL;
+Reservoir* currentReservoir = NULL;
 bool moveCamera = false;
+bool useReSTIR = false;
+
+void createCudaAndCpuMemory(){
+	// allocate CUDA memory
+	cudaMalloc((void**)&previousReservoir, scr_width * scr_height * sizeof(Reservoir));
+	cudaMalloc((void**)&currentReservoir, scr_width * scr_height * sizeof(Reservoir));
+}
 
 void deleteCudaAndCpuMemory(){
 	// free CUDA memory
 	cudaFree(finaloutputbuffer);
 	cudaFree(previousReservoir);
+	cudaFree(currentReservoir);
 }
 
 void createVBO(GLuint* vbo)
@@ -44,13 +53,10 @@ void disp(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	const int current_t = glutGet(GLUT_ELAPSED_TIME);
-	float2 offset = make_float2(std::cosf(float(current_t) * 0.001), std::sinf(float(current_t) * 0.001));
-    if (!moveCamera)
-	{
-		offset.x = 0.0f;
-		offset.y = 0.0f;
-	}
-	render_gate(finaloutputbuffer, offset, frames, WangHash(frames), previousReservoir);
+
+	render_gate(finaloutputbuffer, frames, WangHash(frames), 
+				previousReservoir, currentReservoir, 
+				useReSTIR);
 
     cudaDeviceSynchronize();
 	cudaGLUnmapBufferObject(vbo);
@@ -78,6 +84,12 @@ void Keys(unsigned char key, int x, int y){
 		break;
 	default:
 		break;
+	}
+
+	// Use space key to switch between ReSTIR and non-ReSTIR
+	if (key == ' ')
+	{
+		useReSTIR = !useReSTIR;
 	}
 }
 void SpecialKeys(int key, int x, int y) {}
@@ -117,10 +129,12 @@ int main(int argc, char** argv) {
 
     createVBO(&vbo);
 
-	cudaMalloc((void**)&previousReservoir, scr_width * scr_height * sizeof(Reservoir));
+	createCudaAndCpuMemory();
+	//produce_reference();
 
     glutMainLoop();
 
     deleteCudaAndCpuMemory();
+
 	return 0;
 }

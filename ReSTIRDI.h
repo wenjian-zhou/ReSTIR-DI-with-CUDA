@@ -37,6 +37,10 @@ struct Reservoir
 	}
 };
 
-void render_gate(float3* finaloutputbuffer, float2 offset, int framenumber, uint hashedframenumber, Reservoir *previousReservoir);
+void render_gate(float3* finaloutputbuffer, int framenumber, uint hashedframenumber, 
+				 Reservoir *previousReservoir, Reservoir *currentReservoir, 
+				 bool useReSTIR);
 
 uint WangHash(uint a);
+
+// void produce_reference();
