@@ -17,7 +17,6 @@ float3* finalOutputBuffer = NULL;
 int frames = 0;
 Reservoir* previousReservoir = NULL;
 Reservoir* currentReservoir = NULL;
-bool moveCamera = false;
 bool useReSTIR = false;
 bool temporalReuse = false;
 bool spatialReuse = false;

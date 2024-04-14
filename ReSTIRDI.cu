@@ -339,7 +339,7 @@ __device__ float3 SpatialReuseAndFinalColor(const int &frameNumber, const Ray& r
 		}
 		else
 		{
-			range = 1;
+			range = 1; // To prevent the specular reflection from largely affecting the spatial reuse
 		}
 		int2 offset = make_int2(0, 0);
 		int spatialSampleIndex[k];
