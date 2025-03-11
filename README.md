@@ -1,5 +1,7 @@
 # ReSTIR DI with CUDA
 
+Course project for CS6610 Interactive Computer Graphics.
+
 An implementation of ReSTIR DI based on [smallpt](https://www.kevinbeason.com/smallpt/) with CUDA acceleration, if there's any error please let me know!
 
 ## References
